@@ -304,7 +304,11 @@ func (f *stringFormatter) Format(calldepth int, r *Record, output io.Writer) err
 				v = r.Module
 				break
 			case fmtVerbMessage:
-				v = r.Message()
+				if r.prefix != "" {
+					v = r.prefix + " | " + r.Message()
+				} else {
+					v = r.Message()
+				}
 				break
 			case fmtVerbLongfile, fmtVerbShortfile:
 				_, file, line, ok := runtime.Caller(calldepth + 1)

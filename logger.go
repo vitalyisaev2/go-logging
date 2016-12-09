@@ -53,6 +53,7 @@ type Record struct {
 	fmt       *string
 	formatter Formatter
 	formatted string
+	prefix    string
 }
 
 // Formatted returns the formatted log record string.
@@ -98,6 +99,13 @@ type Logger struct {
 	// ExtraCallDepth can be used to add additional call depth when getting the
 	// calling function. This is normally used when wrapping a logger.
 	ExtraCalldepth int
+	Context        string
+}
+
+func (l *Logger) WithContext(context string) *Logger {
+	newLogger := *l
+	newLogger.Context = context + l.Context
+	return &newLogger
 }
 
 // SetBackend overrides any previously defined backend for this logger.
@@ -153,6 +161,7 @@ func (l *Logger) log(lvl Level, format *string, args ...interface{}) {
 		Level:  lvl,
 		fmt:    format,
 		Args:   args,
+		prefix: l.Context,
 	}
 
 	// TODO use channels to fan out the records to all backends?
