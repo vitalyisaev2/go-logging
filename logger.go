@@ -13,6 +13,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -54,6 +55,7 @@ type Record struct {
 	formatter Formatter
 	formatted string
 	prefix    string
+	isDump    bool
 }
 
 // Formatted returns the formatted log record string.
@@ -62,6 +64,9 @@ func (r *Record) Formatted(calldepth int) string {
 		var buf bytes.Buffer
 		r.formatter.Format(calldepth+1, r, &buf)
 		r.formatted = buf.String()
+		if r.isDump {
+			r.formatted = " - " + r.formatted
+		}
 	}
 	return r.formatted
 }
@@ -100,6 +105,17 @@ type Logger struct {
 	// calling function. This is normally used when wrapping a logger.
 	ExtraCalldepth int
 	Context        string
+
+	//for dumping
+	enableDumping bool
+	triggerLevel  Level
+	records       []string
+	mutex         sync.Mutex
+}
+
+func (l *Logger) SetDumpBehavior(enable bool, lvl Level) {
+	l.enableDumping = enable
+	l.triggerLevel = lvl
 }
 
 func (l *Logger) WithContext(context string) *Logger {
@@ -148,6 +164,21 @@ func (l *Logger) IsEnabledFor(level Level) bool {
 	return defaultBackend.IsEnabledFor(level, l.Module)
 }
 
+func (l *Logger) checkAndDumpRecords(level Level) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if level <= l.triggerLevel {
+		for i := 0; i < len(l.records); i++ {
+			if l.haveBackend {
+				l.backend.LogStr(level, 3+l.ExtraCalldepth, l.records[i])
+			} else {
+				defaultBackend.LogStr(level, 3+l.ExtraCalldepth, l.records[i])
+			}
+		}
+		l.records = l.records[0:0]
+	}
+}
+
 func (l *Logger) log(lvl Level, format *string, args ...interface{}) {
 	if !l.IsEnabledFor(lvl) {
 		return
@@ -164,6 +195,14 @@ func (l *Logger) log(lvl Level, format *string, args ...interface{}) {
 		prefix: l.Context,
 	}
 
+	if l.enableDumping && lvl > l.triggerLevel && !l.backend.IsEnabledFor(lvl, l.Module) {
+		l.mutex.Lock()
+		defer l.mutex.Unlock()
+		record.formatter = l.backend.GetFormatter()
+		str := " - " + record.Formatted(1+l.ExtraCalldepth)
+		l.records = append(l.records, str)
+	}
+
 	// TODO use channels to fan out the records to all backends?
 	// TODO in case of errors, do something (tricky)
 
@@ -173,10 +212,30 @@ func (l *Logger) log(lvl Level, format *string, args ...interface{}) {
 	// are wrapping these methods, eg. to expose them package level
 	if l.haveBackend {
 		l.backend.Log(lvl, 2+l.ExtraCalldepth, record)
+		l.checkAndDumpRecords(lvl)
 		return
 	}
 
 	defaultBackend.Log(lvl, 2+l.ExtraCalldepth, record)
+	l.checkAndDumpRecords(lvl)
+}
+
+func (l *Logger) Printf(format string, args ...interface{}) {
+	str := fmt.Sprintf(format, args...)
+	if l.haveBackend {
+		l.backend.LogStr(DEBUG, 1+l.ExtraCalldepth, str)
+		return
+	}
+	defaultBackend.LogStr(DEBUG, 1+l.ExtraCalldepth, str)
+}
+
+func (l *Logger) Print(args ...interface{}) {
+	str := fmt.Sprint(args...)
+	if l.haveBackend {
+		l.backend.LogStr(DEBUG, 1+l.ExtraCalldepth, str)
+		return
+	}
+	defaultBackend.LogStr(DEBUG, 1+l.ExtraCalldepth, str)
 }
 
 // Fatal is equivalent to l.Critical(fmt.Sprint()) followed by a call to os.Exit(1).

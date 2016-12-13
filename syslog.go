@@ -17,17 +17,17 @@ type SyslogBackend struct {
 // NewSyslogBackend connects to the syslog daemon using UNIX sockets with the
 // given prefix. If prefix is not given, the prefix will be derived from the
 // launched command.
-func NewSyslogBackend(prefix string) (b *SyslogBackend, err error) {
+func NewSyslogBackend(network, addr string, prefix string) (b *SyslogBackend, err error) {
 	var w *syslog.Writer
-	w, err = syslog.New(syslog.LOG_CRIT, prefix)
+	w, err = syslog.Dial(network, addr, syslog.LOG_CRIT, prefix)
 	return &SyslogBackend{w}, err
 }
 
 // NewSyslogBackendPriority is the same as NewSyslogBackend, but with custom
 // syslog priority, like syslog.LOG_LOCAL3|syslog.LOG_DEBUG etc.
-func NewSyslogBackendPriority(prefix string, priority syslog.Priority) (b *SyslogBackend, err error) {
+func NewSyslogBackendPriority(network, addr string, prefix string, priority syslog.Priority) (b *SyslogBackend, err error) {
 	var w *syslog.Writer
-	w, err = syslog.New(priority, prefix)
+	w, err = syslog.Dial(network, addr, priority, prefix)
 	return &SyslogBackend{w}, err
 }
 
@@ -50,4 +50,14 @@ func (b *SyslogBackend) Log(level Level, calldepth int, rec *Record) error {
 	default:
 	}
 	panic("unhandled log level")
+}
+
+func (b *SyslogBackend) GetFormatter() Formatter {
+	return nil
+}
+
+// Log implements the Backend interface.
+func (b *SyslogBackend) LogStr(level Level, calldepth int, str string) error {
+	_, err := b.Writer.Write([]byte(str))
+	return err
 }

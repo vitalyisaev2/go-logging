@@ -11,6 +11,8 @@ var defaultBackend LeveledBackend
 // be used as a logging backend.
 type Backend interface {
 	Log(Level, int, *Record) error
+	LogStr(Level, int, string) error
+	GetFormatter() Formatter
 }
 
 // SetBackend replaces the backend currently set with the given new logging

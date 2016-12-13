@@ -57,6 +57,14 @@ func NewMemoryBackend(size int) *MemoryBackend {
 	return &MemoryBackend{maxSize: int32(size)}
 }
 
+func (b *MemoryBackend) LogStr(level Level, calldepth int, str string) error {
+	return nil
+}
+
+func (b *MemoryBackend) GetFormatter() Formatter {
+	return nil
+}
+
 // Log implements the Log method required by Backend.
 func (b *MemoryBackend) Log(level Level, calldepth int, rec *Record) error {
 	var size int32
@@ -224,6 +232,12 @@ func (b *ChannelMemoryBackend) Stop() {
 // Log implements the Log method required by Backend.
 func (b *ChannelMemoryBackend) Log(level Level, calldepth int, rec *Record) error {
 	b.incoming <- rec
+	return nil
+}
+
+// Log implements the Log method required by Backend.
+func (b *ChannelMemoryBackend) LogStr(level Level, calldepth int, str string) error {
+	//not supported
 	return nil
 }
 

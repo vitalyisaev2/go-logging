@@ -80,8 +80,9 @@ func AddModuleLevel(backend Backend) LeveledBackend {
 	var ok bool
 	if leveled, ok = backend.(LeveledBackend); !ok {
 		leveled = &moduleLeveled{
-			levels:  make(map[string]Level),
-			backend: backend,
+			levels:    make(map[string]Level),
+			backend:   backend,
+			formatter: backend.GetFormatter(),
 		}
 	}
 	return leveled
@@ -120,6 +121,15 @@ func (l *moduleLeveled) Log(level Level, calldepth int, rec *Record) (err error)
 		rec.formatter = l.getFormatterAndCacheCurrent()
 		err = l.backend.Log(level, calldepth+1, rec)
 	}
+	return
+}
+
+func (l *moduleLeveled) GetFormatter() Formatter {
+	return l.getFormatterAndCacheCurrent()
+}
+
+func (l *moduleLeveled) LogStr(level Level, calldepth int, str string) (err error) {
+	err = l.backend.LogStr(level, calldepth+1, str)
 	return
 }
 

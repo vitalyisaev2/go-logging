@@ -305,7 +305,7 @@ func (f *stringFormatter) Format(calldepth int, r *Record, output io.Writer) err
 				break
 			case fmtVerbMessage:
 				if r.prefix != "" {
-					v = r.prefix + " | " + r.Message()
+					v = r.prefix + " : " + r.Message()
 				} else {
 					v = r.Message()
 				}
@@ -409,10 +409,19 @@ func NewBackendFormatter(b Backend, f Formatter) Backend {
 	return &backendFormatter{b, f}
 }
 
+func (bf *backendFormatter) GetFormatter() Formatter {
+	return bf.f
+}
+
 // Log implements the Log function required by the Backend interface.
 func (bf *backendFormatter) Log(level Level, calldepth int, r *Record) error {
 	// Make a shallow copy of the record and replace any formatter
 	r2 := *r
 	r2.formatter = bf.f
 	return bf.b.Log(level, calldepth+1, &r2)
+}
+
+// Log implements the Log function required by the Backend interface.
+func (bf *backendFormatter) LogStr(level Level, calldepth int, str string) error {
+	return bf.b.LogStr(level, calldepth+1, str)
 }

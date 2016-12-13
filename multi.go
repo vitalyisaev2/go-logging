@@ -36,6 +36,20 @@ func (b *multiLogger) Log(level Level, calldepth int, rec *Record) (err error) {
 	return
 }
 
+func (b *multiLogger) GetFormatter() Formatter {
+	return nil
+}
+
+// Log passes the log record to all backends.
+func (b *multiLogger) LogStr(level Level, calldepth int, str string) (err error) {
+	for _, backend := range b.backends {
+		if e := backend.LogStr(level, calldepth+1, str); e != nil {
+			err = e
+		}
+	}
+	return
+}
+
 // GetLevel returns the highest level enabled by all backends.
 func (b *multiLogger) GetLevel(module string) Level {
 	var level Level
