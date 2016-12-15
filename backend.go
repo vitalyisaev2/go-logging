@@ -14,28 +14,3 @@ type Backend interface {
 	LogStr(Level, int, string) error
 	GetFormatter() Formatter
 }
-
-// SetBackend replaces the backend currently set with the given new logging
-// backend.
-func SetBackend(backends ...Backend) LeveledBackend {
-	var backend Backend
-	if len(backends) == 1 {
-		backend = backends[0]
-	} else {
-		backend = MultiLogger(backends...)
-	}
-
-	defaultBackend = AddModuleLevel(backend)
-	return defaultBackend
-}
-
-// SetLevel sets the logging level for the specified module. The module
-// corresponds to the string specified in GetLogger.
-func SetLevel(level Level, module string) {
-	defaultBackend.SetLevel(level, module)
-}
-
-// GetLevel returns the logging level for the specified module.
-func GetLevel(module string) Level {
-	return defaultBackend.GetLevel(module)
-}

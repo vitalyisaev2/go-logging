@@ -10,7 +10,6 @@ package logging
 import (
 	"bytes"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"sync"
@@ -120,7 +119,7 @@ func (l *Logger) SetDumpBehavior(enable bool, lvl Level) {
 
 func (l *Logger) WithContext(context string) *Logger {
 	newLogger := *l
-	newLogger.Context = context + l.Context
+	newLogger.Context = context + ": " + l.Context
 	return &newLogger
 }
 
@@ -153,15 +152,12 @@ func Reset() {
 	// if there's no backends at all configured, we could use some tricks to
 	// automatically setup backends based if we have a TTY or not.
 	sequenceNo = 0
-	b := SetBackend(NewLogBackend(os.Stderr, "", log.LstdFlags))
-	b.SetLevel(DEBUG, "")
-	SetFormatter(DefaultFormatter)
 	timeNow = time.Now
 }
 
 // IsEnabledFor returns true if the logger is enabled for the given level.
 func (l *Logger) IsEnabledFor(level Level) bool {
-	return defaultBackend.IsEnabledFor(level, l.Module)
+	return l.backend.IsEnabledFor(level, l.Module)
 }
 
 func (l *Logger) checkAndDumpRecords(level Level) {

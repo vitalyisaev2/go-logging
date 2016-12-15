@@ -305,7 +305,7 @@ func (f *stringFormatter) Format(calldepth int, r *Record, output io.Writer) err
 				break
 			case fmtVerbMessage:
 				if r.prefix != "" {
-					v = r.prefix + " : " + r.Message()
+					v = r.prefix + r.Message()
 				} else {
 					v = r.Message()
 				}
