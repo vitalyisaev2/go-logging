@@ -97,7 +97,7 @@ func (r *Record) Message() string {
 // called and passes them to the underlying logging backend.
 type Logger struct {
 	Module      string
-	backend     LeveledBackend
+	backend     Backend
 	haveBackend bool
 
 	// ExtraCallDepth can be used to add additional call depth when getting the
@@ -110,6 +110,12 @@ type Logger struct {
 	triggerLevel  Level
 	records       []string
 	mutex         sync.Mutex
+	formatter     Formatter
+	level         Level
+}
+
+func (l *Logger) SetFormatter(fmt Formatter) {
+	l.formatter = fmt
 }
 
 func (l *Logger) SetDumpBehavior(enable bool, lvl Level) {
@@ -124,9 +130,13 @@ func (l *Logger) WithContext(context string) *Logger {
 }
 
 // SetBackend overrides any previously defined backend for this logger.
-func (l *Logger) SetBackend(backend LeveledBackend) {
+func (l *Logger) SetBackend(backend Backend) {
 	l.backend = backend
 	l.haveBackend = true
+}
+
+func (l *Logger) SetLevel(lvl Level) {
+	l.level = lvl
 }
 
 // TODO call NewLogger and remove MustGetLogger?
@@ -157,7 +167,7 @@ func Reset() {
 
 // IsEnabledFor returns true if the logger is enabled for the given level.
 func (l *Logger) IsEnabledFor(level Level) bool {
-	return l.backend.IsEnabledFor(level, l.Module)
+	return level <= l.level
 }
 
 func (l *Logger) checkAndDumpRecords(level Level) {
@@ -167,8 +177,6 @@ func (l *Logger) checkAndDumpRecords(level Level) {
 		for i := 0; i < len(l.records); i++ {
 			if l.haveBackend {
 				l.backend.LogStr(level, 3+l.ExtraCalldepth, l.records[i])
-			} else {
-				defaultBackend.LogStr(level, 3+l.ExtraCalldepth, l.records[i])
 			}
 		}
 		l.records = l.records[0:0]
@@ -176,27 +184,28 @@ func (l *Logger) checkAndDumpRecords(level Level) {
 }
 
 func (l *Logger) log(lvl Level, format *string, args ...interface{}) {
-	if !l.IsEnabledFor(lvl) {
-		return
-	}
 
 	// Create the logging record and pass it in to the backend
 	record := &Record{
-		ID:     atomic.AddUint64(&sequenceNo, 1),
-		Time:   timeNow(),
-		Module: l.Module,
-		Level:  lvl,
-		fmt:    format,
-		Args:   args,
-		prefix: l.Context,
+		ID:        atomic.AddUint64(&sequenceNo, 1),
+		Time:      timeNow(),
+		Module:    l.Module,
+		Level:     lvl,
+		fmt:       format,
+		Args:      args,
+		prefix:    l.Context,
+		formatter: l.formatter,
 	}
 
-	if l.enableDumping && lvl > l.triggerLevel && !l.backend.IsEnabledFor(lvl, l.Module) {
+	if l.enableDumping && lvl > l.triggerLevel && !l.IsEnabledFor(lvl) {
 		l.mutex.Lock()
 		defer l.mutex.Unlock()
-		record.formatter = l.backend.GetFormatter()
-		str := " - " + record.Formatted(1+l.ExtraCalldepth)
+		str := " - " + record.Formatted(2+l.ExtraCalldepth)
 		l.records = append(l.records, str)
+	}
+
+	if !l.IsEnabledFor(lvl) {
+		return
 	}
 
 	// TODO use channels to fan out the records to all backends?
@@ -211,9 +220,6 @@ func (l *Logger) log(lvl Level, format *string, args ...interface{}) {
 		l.checkAndDumpRecords(lvl)
 		return
 	}
-
-	defaultBackend.Log(lvl, 2+l.ExtraCalldepth, record)
-	l.checkAndDumpRecords(lvl)
 }
 
 func (l *Logger) Printf(format string, args ...interface{}) {
@@ -222,7 +228,6 @@ func (l *Logger) Printf(format string, args ...interface{}) {
 		l.backend.LogStr(DEBUG, 1+l.ExtraCalldepth, str)
 		return
 	}
-	defaultBackend.LogStr(DEBUG, 1+l.ExtraCalldepth, str)
 }
 
 func (l *Logger) Print(args ...interface{}) {
@@ -231,7 +236,6 @@ func (l *Logger) Print(args ...interface{}) {
 		l.backend.LogStr(DEBUG, 1+l.ExtraCalldepth, str)
 		return
 	}
-	defaultBackend.LogStr(DEBUG, 1+l.ExtraCalldepth, str)
 }
 
 // Fatal is equivalent to l.Critical(fmt.Sprint()) followed by a call to os.Exit(1).

@@ -7,7 +7,6 @@ package logging
 import (
 	"errors"
 	"strings"
-	"sync"
 )
 
 // ErrInvalidLogLevel is used when an invalid log level has been used.
@@ -48,96 +47,4 @@ func LogLevel(level string) (Level, error) {
 		}
 	}
 	return ERROR, ErrInvalidLogLevel
-}
-
-// Leveled interface is the interface required to be able to add leveled
-// logging.
-type Leveled interface {
-	GetLevel(string) Level
-	SetLevel(Level, string)
-	IsEnabledFor(Level, string) bool
-}
-
-// LeveledBackend is a log backend with additional knobs for setting levels on
-// individual modules to different levels.
-type LeveledBackend interface {
-	Backend
-	Leveled
-}
-
-type moduleLeveled struct {
-	sync.RWMutex
-	levels    map[string]Level
-	backend   Backend
-	formatter Formatter
-	once      sync.Once
-}
-
-// AddModuleLevel wraps a log backend with knobs to have different log levels
-// for different modules.
-func AddModuleLevel(backend Backend) LeveledBackend {
-	var leveled LeveledBackend
-	var ok bool
-	if leveled, ok = backend.(LeveledBackend); !ok {
-		leveled = &moduleLeveled{
-			levels:    make(map[string]Level),
-			backend:   backend,
-			formatter: backend.GetFormatter(),
-		}
-	}
-	return leveled
-}
-
-// GetLevel returns the log level for the given module.
-func (l *moduleLeveled) GetLevel(module string) Level {
-	l.Lock()
-	defer l.Unlock()
-	level, exists := l.levels[module]
-	if exists == false {
-		level, exists = l.levels[""]
-		// no configuration exists, default to debug
-		if exists == false {
-			level = DEBUG
-		}
-	}
-	return level
-}
-
-// SetLevel sets the log level for the given module.
-func (l *moduleLeveled) SetLevel(level Level, module string) {
-	l.Lock()
-	defer l.Unlock()
-	l.levels[module] = level
-}
-
-// IsEnabledFor will return true if logging is enabled for the given module.
-func (l *moduleLeveled) IsEnabledFor(level Level, module string) bool {
-	return level <= l.GetLevel(module)
-}
-
-func (l *moduleLeveled) Log(level Level, calldepth int, rec *Record) (err error) {
-	if l.IsEnabledFor(level, rec.Module) {
-		// TODO get rid of traces of formatter here. BackendFormatter should be used.
-		rec.formatter = l.getFormatterAndCacheCurrent()
-		err = l.backend.Log(level, calldepth+1, rec)
-	}
-	return
-}
-
-func (l *moduleLeveled) GetFormatter() Formatter {
-	return l.getFormatterAndCacheCurrent()
-}
-
-func (l *moduleLeveled) LogStr(level Level, calldepth int, str string) (err error) {
-	err = l.backend.LogStr(level, calldepth+1, str)
-	return
-}
-
-func (l *moduleLeveled) getFormatterAndCacheCurrent() Formatter {
-	l.once.Do(func() {
-		if l.formatter == nil {
-			l.formatter = getFormatter()
-		}
-	})
-	return l.formatter
 }
