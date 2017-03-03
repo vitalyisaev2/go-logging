@@ -134,6 +134,12 @@ func (l *Logger) WithContext(context string) *Logger {
 	return &newLogger
 }
 
+func (l *Logger) WithLevel(level Level) *Logger {
+	newLogger := *l
+	newLogger.level = level
+	return &newLogger
+}
+
 // SetBackend overrides any previously defined backend for this logger.
 func (l *Logger) SetBackend(backend Backend) {
 	l.backend = backend
