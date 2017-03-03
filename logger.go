@@ -49,12 +49,13 @@ type Record struct {
 
 	// message is kept as a pointer to have shallow copies update this once
 	// needed.
-	message   *string
-	fmt       *string
-	formatter Formatter
-	formatted string
-	prefix    string
-	isDump    bool
+	message    *string
+	fmt        *string
+	formatter  Formatter
+	formatted  string
+	prefix     string
+	dumpPrefix string
+	isDump     bool
 }
 
 // Formatted returns the formatted log record string.
@@ -64,7 +65,7 @@ func (r *Record) Formatted(calldepth int) string {
 		r.formatter.Format(calldepth+1, r, &buf)
 		r.formatted = buf.String()
 		if r.isDump {
-			r.formatted = " - " + r.formatted
+			r.formatted = r.dumpPrefix + r.formatted
 		}
 	}
 	return r.formatted
@@ -109,23 +110,27 @@ type Logger struct {
 	enableDumping bool
 	triggerLevel  Level
 	records       []string
-	mutex         sync.Mutex
+	mutex         *sync.Mutex
 	formatter     Formatter
 	level         Level
+	ctxSep        string
+	dumpPrefix    string
 }
 
 func (l *Logger) SetFormatter(fmt Formatter) {
 	l.formatter = fmt
 }
 
-func (l *Logger) SetDumpBehavior(enable bool, lvl Level) {
+func (l *Logger) SetDumpBehavior(enable bool, lvl Level, dumpPrefix string) {
 	l.enableDumping = enable
 	l.triggerLevel = lvl
+	l.dumpPrefix = dumpPrefix
 }
 
 func (l *Logger) WithContext(context string) *Logger {
 	newLogger := *l
-	newLogger.Context = context + ": " + l.Context
+	newLogger.mutex = &sync.Mutex{}
+	newLogger.Context = context + l.ctxSep + l.Context
 	return &newLogger
 }
 
@@ -143,16 +148,20 @@ func (l *Logger) SetLevel(lvl Level) {
 
 // GetLogger creates and returns a Logger object based on the module name.
 func GetLogger(module string) (*Logger, error) {
-	return &Logger{Module: module}, nil
+	return &Logger{
+		Module: module,
+		mutex:  &sync.Mutex{},
+	}, nil
 }
 
 // MustGetLogger is like GetLogger but panics if the logger can't be created.
 // It simplifies safe initialization of a global logger for eg. a package.
-func MustGetLogger(module string) *Logger {
+func MustGetLogger(module, contextSeparator string) *Logger {
 	logger, err := GetLogger(module)
 	if err != nil {
 		panic("logger: " + module + ": " + err.Error())
 	}
+	logger.ctxSep = contextSeparator
 	return logger
 }
 
@@ -187,21 +196,22 @@ func (l *Logger) log(lvl Level, format *string, args ...interface{}) {
 
 	// Create the logging record and pass it in to the backend
 	record := &Record{
-		ID:        atomic.AddUint64(&sequenceNo, 1),
-		Time:      timeNow(),
-		Module:    l.Module,
-		Level:     lvl,
-		fmt:       format,
-		Args:      args,
-		prefix:    l.Context,
-		formatter: l.formatter,
+		ID:         atomic.AddUint64(&sequenceNo, 1),
+		Time:       timeNow(),
+		Module:     l.Module,
+		Level:      lvl,
+		fmt:        format,
+		Args:       args,
+		prefix:     l.Context,
+		formatter:  l.formatter,
+		dumpPrefix: l.dumpPrefix,
 	}
 
 	if l.enableDumping && lvl > l.triggerLevel && !l.IsEnabledFor(lvl) {
 		l.mutex.Lock()
-		defer l.mutex.Unlock()
-		str := " - " + record.Formatted(2+l.ExtraCalldepth)
+		str := l.dumpPrefix + record.Formatted(2+l.ExtraCalldepth)
 		l.records = append(l.records, str)
+		l.mutex.Unlock()
 	}
 
 	if !l.IsEnabledFor(lvl) {
