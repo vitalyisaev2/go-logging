@@ -130,7 +130,8 @@ func (l *Logger) SetDumpBehavior(enable bool, lvl Level, dumpPrefix string) {
 func (l *Logger) WithContext(context string) *Logger {
 	newLogger := *l
 	newLogger.mutex = &sync.Mutex{}
-	newLogger.Context = context + l.ctxSep + l.Context
+	newLogger.records = []string{}
+	newLogger.Context = l.Context + l.ctxSep + context
 	return &newLogger
 }
 
