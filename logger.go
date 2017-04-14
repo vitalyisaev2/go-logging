@@ -131,7 +131,8 @@ func (l *Logger) WithContext(context string) *Logger {
 	newLogger := *l
 	newLogger.mutex = &sync.Mutex{}
 	newLogger.records = []string{}
-	newLogger.Context = l.Context + l.ctxSep + context
+	newLogger.Context = l.Context + context + l.ctxSep
+	newLogger.ctxSep = l.ctxSep
 	return &newLogger
 }
 
