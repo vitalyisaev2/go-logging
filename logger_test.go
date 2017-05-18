@@ -1,62 +1,138 @@
-// Copyright 2013, Örjan Persson. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package logging
 
-import "testing"
+import (
+	"fmt"
+	"testing"
 
-type Password string
+	"github.com/stretchr/testify/assert"
+)
 
-func (p Password) Redacted() interface{} {
-	return Redact(string(p))
+const (
+	module           = "module"
+	contextSeparator = ": "
+	bufferCapacity   = 32
+	format           = "%{message}"
+
+	msgTemplate = "%s"
+	msgDebug    = "debug"
+	msgInfo     = "info"
+	msgNotice   = "notice"
+	msgWarning  = "warning"
+	msgError    = "error"
+	msgCritical = "critical"
+)
+
+func loggerWithMemoryBackend() *Logger {
+	l := MustGetLogger(module, contextSeparator, bufferCapacity)
+	l.SetBackend(newMemoryBackend())
+	l.SetFormatter(MustStringFormatter(format))
+	return l
 }
 
-func TestSequenceNoOverflow(t *testing.T) {
-	// Forcefully set the next sequence number to the maximum
-	backend := InitForTesting(DEBUG)
-	sequenceNo = ^uint64(0)
+func TestLogger_Debug_SimpleMethods(t *testing.T) {
+	l := loggerWithMemoryBackend()
+	l.SetLevel(DEBUG)
 
-	log := MustGetLogger("test")
-	log.Debug("test")
+	l.Debug(msgDebug)
+	l.Info(msgInfo)
+	l.Notice(msgNotice)
+	l.Warning(msgWarning)
+	l.Error(msgError)
+	l.Critical(msgCritical)
 
-	if MemoryRecordN(backend, 0).ID != 0 {
-		t.Errorf("Unexpected sequence no: %v", MemoryRecordN(backend, 0).ID)
-	}
+	// Check records that were received by backend
+	backend := l.backend.(*memoryBackend)
+	assert.Len(t, backend.records, 6)
+	assert.Len(t, backend.msgs, 0)
+	assert.Equal(t, msgDebug, backend.records[0].Args[0])
+	assert.Equal(t, msgInfo, backend.records[1].Args[0])
+	assert.Equal(t, msgNotice, backend.records[2].Args[0])
+	assert.Equal(t, msgWarning, backend.records[3].Args[0])
+	assert.Equal(t, msgError, backend.records[4].Args[0])
+	assert.Equal(t, msgCritical, backend.records[5].Args[0])
+
+	// Ring buffer should be empty, because we're in debug
+	assert.Nil(t, l.records.Dequeue())
 }
 
-func TestRedact(t *testing.T) {
-	backend := InitForTesting(DEBUG)
-	password := Password("123456")
-	log := MustGetLogger("test")
-	log.Debug("foo", password)
-	if "foo ******" != MemoryRecordN(backend, 0).Formatted(0) {
-		t.Errorf("redacted line: %v", MemoryRecordN(backend, 0))
-	}
+func TestLogger_Debug_FormattingMethods(t *testing.T) {
+	l := loggerWithMemoryBackend()
+	l.SetLevel(DEBUG)
+
+	l.Debugf(msgTemplate, msgDebug)
+	l.Infof(msgTemplate, msgInfo)
+	l.Noticef(msgTemplate, msgNotice)
+	l.Warningf(msgTemplate, msgWarning)
+	l.Errorf(msgTemplate, msgError)
+	l.Criticalf(msgTemplate, msgCritical)
+
+	// Check records that were received by backend
+	backend := l.backend.(*memoryBackend)
+	assert.Len(t, backend.records, 6)
+	assert.Len(t, backend.msgs, 0)
+	assert.Equal(t, msgDebug, backend.records[0].Args[0])
+	assert.Equal(t, msgInfo, backend.records[1].Args[0])
+	assert.Equal(t, msgNotice, backend.records[2].Args[0])
+	assert.Equal(t, msgWarning, backend.records[3].Args[0])
+	assert.Equal(t, msgError, backend.records[4].Args[0])
+	assert.Equal(t, msgCritical, backend.records[5].Args[0])
+
+	// Ring buffer should be empty, because we're in debug
+	assert.Nil(t, l.records.Dequeue())
 }
 
-func TestRedactf(t *testing.T) {
-	backend := InitForTesting(DEBUG)
-	password := Password("123456")
-	log := MustGetLogger("test")
-	log.Debugf("foo %s", password)
-	if "foo ******" != MemoryRecordN(backend, 0).Formatted(0) {
-		t.Errorf("redacted line: %v", MemoryRecordN(backend, 0).Formatted(0))
-	}
+func TestLogger_Dumping(t *testing.T) {
+	l := loggerWithMemoryBackend()
+	l.SetLevel(ERROR)
+	l.SetDumpBehavior(true, ERROR, "")
+
+	// Send several messages that have level less than loggers level
+	l.Debug(msgDebug)
+	l.Info(msgInfo)
+	l.Notice(msgNotice)
+	l.Warningf(msgTemplate, msgWarning)
+
+	// They must not exist in backend yet
+	backend := l.backend.(*memoryBackend)
+	assert.Len(t, backend.records, 0)
+
+	// Send message with triggering level
+	l.Error(msgError)
+
+	// Now we suppose to have 1 error record and 4 previous messages in backend
+	assert.Len(t, backend.records, 1)
+	assert.Len(t, backend.msgs, 4)
+	assert.Equal(t, msgError, backend.records[0].Args[0])
+	assert.Equal(t, msgDebug, backend.msgs[0])
+	assert.Equal(t, msgInfo, backend.msgs[1])
+	assert.Equal(t, msgNotice, backend.msgs[2])
+	assert.Equal(t, msgWarning, backend.msgs[3])
+
+	// Ring buffer is empty now
+	assert.Nil(t, l.records.Dequeue())
 }
 
-func TestPrivateBackend(t *testing.T) {
-	stdBackend := InitForTesting(DEBUG)
-	log := MustGetLogger("test")
-	privateBackend := NewMemoryBackend(10240)
-	lvlBackend := AddModuleLevel(privateBackend)
-	lvlBackend.SetLevel(DEBUG, "")
-	log.SetBackend(lvlBackend)
-	log.Debug("to private backend")
-	if stdBackend.size > 0 {
-		t.Errorf("something in stdBackend, size of backend: %d", stdBackend.size)
+func TestLogger_RingBufferReusage(t *testing.T) {
+	l := MustGetLogger(module, contextSeparator, 4)
+	l.SetBackend(newMemoryBackend())
+	l.SetFormatter(MustStringFormatter(format))
+	l.SetLevel(ERROR)
+	l.SetDumpBehavior(true, ERROR, "")
+
+	// Write 8 low-level messages
+	for i := 0; i < 8; i++ {
+		l.Debug(i)
 	}
-	if "to private baсkend" == MemoryRecordN(privateBackend, 0).Formatted(0) {
-		t.Error("logged to defaultBackend:", MemoryRecordN(privateBackend, 0))
+
+	// Flush ring buffer into backend
+	l.Error(msgError)
+
+	backend := l.backend.(*memoryBackend)
+	assert.Len(t, backend.records, 1)
+	assert.Len(t, backend.msgs, 4)
+
+	// Only last 4 low-level message should appear in backend
+	for i := 4; i < 8; i++ {
+		assert.Equal(t, fmt.Sprint(i), backend.msgs[i-4])
 	}
 }

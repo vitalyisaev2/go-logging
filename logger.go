@@ -206,9 +206,12 @@ func (l *Logger) checkAndDumpRecords(level Level) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 	if level <= l.triggerLevel {
-		for i := 0; i < l.records.Capacity(); i++ {
+		for {
+			val := l.records.Dequeue()
+			if val == nil {
+				break
+			}
 			if l.haveBackend {
-				val := l.records.Dequeue()
 				if msg, ok := val.(string); !ok {
 					panic(fmt.Sprintf("Severe implementation error: cannot cast %+v to string", val))
 				} else {
