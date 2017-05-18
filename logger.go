@@ -15,6 +15,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/zfjagann/golang-ring"
 )
 
 // Redactor is an interface for types that may contain sensitive information
@@ -94,6 +96,13 @@ func (r *Record) Message() string {
 	return *r.message
 }
 
+// A ring buffer is used in the every logger instance to store several last records
+func newRingBuffer(capacity int) *ring.Ring {
+	r := &ring.Ring{}
+	r.SetCapacity(capacity)
+	return r
+}
+
 // Logger is the actual logger which creates log records based on the functions
 // called and passes them to the underlying logging backend.
 type Logger struct {
@@ -109,7 +118,8 @@ type Logger struct {
 	//for dumping
 	enableDumping bool
 	triggerLevel  Level
-	records       []string
+	records       *ring.Ring
+	capacity      int
 	mutex         *sync.Mutex
 	formatter     Formatter
 	level         Level
@@ -117,25 +127,28 @@ type Logger struct {
 	dumpPrefix    string
 }
 
+// SetFormatter ...
 func (l *Logger) SetFormatter(fmt Formatter) {
 	l.formatter = fmt
 }
 
+// SetDumpBehavior ...
 func (l *Logger) SetDumpBehavior(enable bool, lvl Level, dumpPrefix string) {
 	l.enableDumping = enable
 	l.triggerLevel = lvl
 	l.dumpPrefix = dumpPrefix
 }
 
+// WithContext builds new logger with new ring buffer inside but with inherited context
 func (l *Logger) WithContext(context string) *Logger {
 	newLogger := *l
 	newLogger.mutex = &sync.Mutex{}
-	newLogger.records = []string{}
+	newLogger.records = newRingBuffer(l.capacity)
 	newLogger.Context = l.Context + context + l.ctxSep
-	newLogger.ctxSep = l.ctxSep
 	return &newLogger
 }
 
+// WithLevel ...
 func (l *Logger) WithLevel(level Level) *Logger {
 	newLogger := *l
 	newLogger.level = level
@@ -148,6 +161,7 @@ func (l *Logger) SetBackend(backend Backend) {
 	l.haveBackend = true
 }
 
+// SetLevel ...
 func (l *Logger) SetLevel(lvl Level) {
 	l.level = lvl
 }
@@ -155,17 +169,18 @@ func (l *Logger) SetLevel(lvl Level) {
 // TODO call NewLogger and remove MustGetLogger?
 
 // GetLogger creates and returns a Logger object based on the module name.
-func GetLogger(module string) (*Logger, error) {
+func GetLogger(module string, capacity int) (*Logger, error) {
 	return &Logger{
-		Module: module,
-		mutex:  &sync.Mutex{},
+		Module:  module,
+		records: newRingBuffer(capacity),
+		mutex:   &sync.Mutex{},
 	}, nil
 }
 
 // MustGetLogger is like GetLogger but panics if the logger can't be created.
 // It simplifies safe initialization of a global logger for eg. a package.
-func MustGetLogger(module, contextSeparator string) *Logger {
-	logger, err := GetLogger(module)
+func MustGetLogger(module, contextSeparator string, capacity int) *Logger {
+	logger, err := GetLogger(module, capacity)
 	if err != nil {
 		panic("logger: " + module + ": " + err.Error())
 	}
@@ -191,12 +206,16 @@ func (l *Logger) checkAndDumpRecords(level Level) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 	if level <= l.triggerLevel {
-		for i := 0; i < len(l.records); i++ {
+		for i := 0; i < l.records.Capacity(); i++ {
 			if l.haveBackend {
-				l.backend.LogStr(level, 3+l.ExtraCalldepth, l.records[i])
+				val := l.records.Dequeue()
+				if msg, ok := val.(string); !ok {
+					panic(fmt.Sprintf("Severe implementation error: cannot cast %+v to string", val))
+				} else {
+					l.backend.LogStr(level, 3+l.ExtraCalldepth, msg)
+				}
 			}
 		}
-		l.records = l.records[0:0]
 	}
 }
 
@@ -218,7 +237,7 @@ func (l *Logger) log(lvl Level, format *string, args ...interface{}) {
 	if l.enableDumping && lvl > l.triggerLevel && !l.IsEnabledFor(lvl) {
 		l.mutex.Lock()
 		str := l.dumpPrefix + record.Formatted(2+l.ExtraCalldepth)
-		l.records = append(l.records, str)
+		l.records.Enqueue(str)
 		l.mutex.Unlock()
 	}
 
@@ -240,6 +259,7 @@ func (l *Logger) log(lvl Level, format *string, args ...interface{}) {
 	}
 }
 
+// Printf ...
 func (l *Logger) Printf(format string, args ...interface{}) {
 	str := fmt.Sprintf(format, args...)
 	if l.haveBackend {
@@ -248,6 +268,7 @@ func (l *Logger) Printf(format string, args ...interface{}) {
 	}
 }
 
+// Print ...
 func (l *Logger) Print(args ...interface{}) {
 	str := fmt.Sprint(args...)
 	if l.haveBackend {
